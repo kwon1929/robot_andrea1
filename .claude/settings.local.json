@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch:*)",
+      "Bash(git pull:*)",
+      "Bash(npm update)",
+      "Bash(npm update:*)",
+      "Bash(sudo npm update -g @anthropic-ai/claude-code)",
+      "Bash(npm i:*)",
+      "Bash(sudo npm i -g @anthropic-ai/claude-code)",
+      "Bash(npm config:*)",
+      "Bash(export PATH=~/.npm-global/bin:$PATH)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(npm install:*)",
+      "Bash(npm run dev:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

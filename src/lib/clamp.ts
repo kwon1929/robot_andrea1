@@ -2,25 +2,46 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-// Human-like joint limits (in degrees)
+// Anatomically accurate human joint limits (in degrees)
+// Based on average human range of motion
 export const JOINT_LIMITS = {
   shoulder: {
-    pitch: { min: -45, max: 180 } // -45 = backward, 180 = full forward
+    pitch: { min: -50, max: 170 }, // -50 = arm back, 170 = arm forward/up (realistic max, not 180)
+    roll: { min: -40, max: 180 }   // -40 = arm across body, 180 = arm out to side and up
   },
   elbow: {
-    flex: { min: 0, max: 140 } // 0 = straight, 140 = fully bent (ONLY FORWARD)
+    flex: { min: 0, max: 145 } // 0 = straight, 145 = fully bent (ONLY FORWARD)
   },
   hip: {
-    pitch: { min: -30, max: 110 } // -30 = back extension, 110 = forward (sitting)
+    pitch: { min: -20, max: 120 }, // -20 = leg back, 120 = leg forward (sitting/squat)
+    roll: { min: -45, max: 45 }    // -45 = leg cross inward, 45 = leg out (abduction)
   },
   knee: {
-    flex: { min: 0, max: 140 } // 0 = straight, 140 = fully bent (ONLY FORWARD)
+    flex: { min: 0, max: 135 } // 0 = straight, 135 = fully bent (can't touch heel to butt)
   },
+  torso: {
+    pitch: { min: -30, max: 60 }, // -30 = lean back, 60 = bend forward
+    roll: { min: -30, max: 30 }   // -30/30 = side bending
+  }
 };
 
 // Apply constraints to pose to prevent unnatural joint angles
 export function constrainPose(pose: any): any {
   const constrained = JSON.parse(JSON.stringify(pose));
+
+  // Constrain torso (if exists)
+  if (constrained.torso) {
+    constrained.torso.pitch = clamp(
+      constrained.torso.pitch,
+      JOINT_LIMITS.torso.pitch.min,
+      JOINT_LIMITS.torso.pitch.max
+    );
+    constrained.torso.roll = clamp(
+      constrained.torso.roll,
+      JOINT_LIMITS.torso.roll.min,
+      JOINT_LIMITS.torso.roll.max
+    );
+  }
 
   // Constrain arms
   constrained.leftArm.shoulder.pitch = clamp(

@@ -111,28 +111,38 @@ export function createPickPlan(
   robot: Robot,
   targetObject: PickableObject
 ): ActionPlan {
-  const targetPos = { ...targetObject.position, y: 0 }; // 지면 높이로 통일
+  const groundLevel = -0.35; // 로봇의 바닥 높이 (발이 y=-2에 닿음)
+  const targetPos = { x: targetObject.position.x, y: groundLevel, z: targetObject.position.z };
   const dist = distance(robot.position, targetPos);
   const needsNavigation = dist > 0.5; // 0.5 unit 이상이면 걸어감
 
   const steps: ActionStep[] = [];
 
+  // 목표 방향 계산
+  const targetRotation = angleTo(robot.position, targetPos);
+
   if (needsNavigation) {
-    // 1단계: 걸어가기
-    // ✅ duration 조정: dist * 500 → 더 빠르게/느리게
+    // 1단계: 먼저 목표를 향해 회전 (사람처럼!)
+    steps.push({
+      type: "align",
+      targetRotation,
+      duration: 400,  // 회전 시간
+    });
+
+    // 2단계: 앞으로 걸어가기
     steps.push({
       type: "navigate",
       targetPosition: targetPos,
+      targetRotation, // 걸어가는 동안 방향 유지
       duration: dist * 500, // 거리 1 unit당 500ms
     });
   }
 
-  // 2단계: 물건 쪽으로 회전
-  const targetRotation = angleTo(robot.position, targetPos);
+  // 3단계: 물건 정면으로 정확히 정렬 (미세 조정)
   steps.push({
     type: "align",
     targetRotation,
-    duration: 300,  // ✅ 더 빠른 회전: 300 → 150
+    duration: 200,  // 빠른 미세 조정
   });
 
   // 3단계: 앉기 (무릎 굽히기 + 몸 낮추기)

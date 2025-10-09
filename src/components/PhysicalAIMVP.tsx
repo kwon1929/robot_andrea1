@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Scene from "./Scene";
 import ChatPanel from "./ChatPanel";
 import { useIntentParser } from "../hooks/useIntentParser";
@@ -7,7 +7,7 @@ import type { Robot, Intent, FullPose, PickableObject, ActionPlan, ActionStep } 
 import { clamp, JOINT_LIMITS, constrainPose } from "../lib/clamp";
 import { MOTIONS, lerpPose, ease, lerpVec3 } from "../lib/motion";
 import { findObjectByDescription, createPickPlan, createDropPlan } from "../lib/actionPlanner";
-import { executeActionPlan } from "../lib/actionExecutor";
+import { executeActionPlan, cleanupAllIntervals } from "../lib/actionExecutor";
 
 const DEFAULT_POSE: FullPose = {
   leftArm: { shoulder: { pitch: 0 }, elbow: { flex: 0 } },
@@ -20,22 +20,31 @@ export default function PhysicalAIMVP() {
   const [robots, setRobots] = useState<Robot[]>([
     {
       id: "robot-1",
-      name: "Robot 1",
+      name: "ANDREA Kernel I",
       pose: JSON.parse(JSON.stringify(DEFAULT_POSE)),
-      position: { x: 0, y: 0, z: 0 },
+      position: { x: 0, y: -0.35, z: 0 }, // Standing on ground - feet at y=-2 plane
       rotation: 0,
       holdingObjectId: null,
     },
   ]);
 
   const [objects, setObjects] = useState<PickableObject[]>([
-    { id: "obj-1", name: "red box", type: "box", position: { x: 1, y: -1.5, z: 0 }, color: "#ef4444", size: 0.3, isPicked: false },
-    { id: "obj-2", name: "blue ball", type: "sphere", position: { x: -1, y: -1.5, z: 1 }, color: "#3b82f6", size: 0.3, isPicked: false },
-    { id: "obj-3", name: "green cylinder", type: "cylinder", position: { x: 0.5, y: -1.5, z: -1.5 }, color: "#10b981", size: 0.3, isPicked: false },
+    { id: "obj-1", name: "red box", type: "box", position: { x: 1.5, y: -1.5, z: 0 }, color: "#ef4444", size: 0.3, isPicked: false },
+    { id: "obj-2", name: "blue ball", type: "sphere", position: { x: -1.5, y: -1.5, z: 1 }, color: "#3b82f6", size: 0.3, isPicked: false },
+    { id: "obj-3", name: "green cylinder", type: "cylinder", position: { x: 0.5, y: -1.5, z: -1.8 }, color: "#10b981", size: 0.3, isPicked: false },
+    { id: "obj-4", name: "yellow cube", type: "box", position: { x: -1, y: -1.5, z: -1 }, color: "#fbbf24", size: 0.25, isPicked: false },
+    { id: "obj-5", name: "purple sphere", type: "sphere", position: { x: 2, y: -1.5, z: -1.5 }, color: "#a855f7", size: 0.3, isPicked: false },
   ]);
 
   const [logs, setLogs] = useState<Intent[]>([]);
   const { parseCommand } = useIntentParser();
+
+  // Cleanup intervals on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      cleanupAllIntervals();
+    };
+  }, []);
 
   const applyAction = (intent: Intent) => {
     setLogs((prev) => [...prev, intent]);
@@ -97,43 +106,6 @@ export default function PhysicalAIMVP() {
           return { ...robot, pose: JSON.parse(JSON.stringify(DEFAULT_POSE)) };
         }
 
-        if (intent.type === "pose" && intent.side && intent.joint && intent.angle !== undefined) {
-          const newPose = JSON.parse(JSON.stringify(robot.pose));
-          const limit = JOINT_LIMITS[intent.joint];
-
-          if (intent.joint === "shoulder" && intent.axis === "pitch") {
-            const armKey = intent.side === "left" ? "leftArm" : "rightArm";
-            newPose[armKey].shoulder.pitch = clamp(
-              intent.angle,
-              limit.pitch.min,
-              limit.pitch.max
-            );
-          } else if (intent.joint === "elbow" && intent.axis === "flex") {
-            const armKey = intent.side === "left" ? "leftArm" : "rightArm";
-            newPose[armKey].elbow.flex = clamp(
-              intent.angle,
-              limit.flex.min,
-              limit.flex.max
-            );
-          } else if (intent.joint === "hip" && intent.axis === "pitch") {
-            const legKey = intent.side === "left" ? "leftLeg" : "rightLeg";
-            newPose[legKey].hip.pitch = clamp(
-              intent.angle,
-              limit.pitch.min,
-              limit.pitch.max
-            );
-          } else if (intent.joint === "knee" && intent.axis === "flex") {
-            const legKey = intent.side === "left" ? "leftLeg" : "rightLeg";
-            newPose[legKey].knee.flex = clamp(
-              intent.angle,
-              limit.flex.min,
-              limit.flex.max
-            );
-          }
-
-          return { ...robot, pose: newPose };
-        }
-
         if (intent.type === "wave" && intent.side) {
           // Simple wave animation by toggling shoulder pitch
           const newPose = JSON.parse(JSON.stringify(robot.pose));
@@ -185,6 +157,7 @@ export default function PhysicalAIMVP() {
     // Try GPT parsing first, fallback to rule-based
     try {
       const intents = await parseCommandWithGPT(text);
+      console.log("Parsed intents:", intents);
 
       // Execute intents sequentially - wait for each to complete
       for (let i = 0; i < intents.length; i++) {
@@ -193,42 +166,46 @@ export default function PhysicalAIMVP() {
         // For pick/drop actions, we need to wait for completion
         if (intent.type === "pick" || intent.type === "drop") {
           await new Promise<void>((resolve) => {
-            // Wrap applyAction to capture completion
-            const originalApplyAction = applyAction;
+            // Get fresh robot and objects state
+            setRobots((currentRobots) => {
+              setObjects((currentObjects) => {
+                const robot = currentRobots[0];
 
-            // Temporarily override applyAction for this intent
-            if (intent.type === "pick") {
-              const robot = robots[0];
-              if (robot.holdingObjectId) {
-                console.warn("Robot is already holding an object");
-                resolve();
-                return;
-              }
+                if (intent.type === "pick") {
+                  if (robot.holdingObjectId) {
+                    console.warn("Robot is already holding an object");
+                    resolve();
+                    return currentObjects;
+                  }
 
-              const targetObject = intent.objectName
-                ? findObjectByDescription(objects, intent.objectName)
-                : objects.find(obj => !obj.isPicked);
+                  const targetObject = intent.objectName
+                    ? findObjectByDescription(currentObjects, intent.objectName)
+                    : currentObjects.find(obj => !obj.isPicked);
 
-              if (!targetObject) {
-                console.warn(`Object "${intent.objectName || 'any'}" not found`);
-                resolve();
-                return;
-              }
+                  if (!targetObject) {
+                    console.warn(`Object "${intent.objectName || 'any'}" not found`);
+                    resolve();
+                    return currentObjects;
+                  }
 
-              const plan = createPickPlan(robot, targetObject);
-              executeActionPlan(plan, robot, setRobots, setObjects, resolve);
+                  const plan = createPickPlan(robot, targetObject);
+                  executeActionPlan(plan, robot, setRobots, setObjects, resolve);
 
-            } else if (intent.type === "drop") {
-              const robot = robots[0];
-              if (!robot.holdingObjectId) {
-                console.warn("Robot is not holding any object");
-                resolve();
-                return;
-              }
+                } else if (intent.type === "drop") {
+                  if (!robot.holdingObjectId) {
+                    console.warn("Robot is not holding any object");
+                    resolve();
+                    return currentObjects;
+                  }
 
-              const plan = createDropPlan(robot);
-              executeActionPlan(plan, robot, setRobots, setObjects, resolve);
-            }
+                  const plan = createDropPlan(robot);
+                  executeActionPlan(plan, robot, setRobots, setObjects, resolve);
+                }
+
+                return currentObjects;
+              });
+              return currentRobots;
+            });
           });
         } else {
           // For other actions, execute normally
@@ -249,11 +226,44 @@ export default function PhysicalAIMVP() {
   };
 
   return (
-    <div className="h-screen flex">
-      <div className="flex-1 bg-gray-100">
-        <Scene robots={robots} objects={objects} />
+    <div className="h-screen flex bg-gradient-to-br from-gray-50 to-gray-100 relative overflow-hidden">
+      {/* Clean minimal background */}
+      <div className="absolute inset-0 opacity-5">
+        <div className="absolute w-96 h-96 bg-gray-400 rounded-full blur-3xl" style={{ top: '10%', left: '20%' }} />
+        <div className="absolute w-96 h-96 bg-gray-300 rounded-full blur-3xl" style={{ bottom: '10%', right: '20%' }} />
       </div>
-      <div className="w-96">
+
+      <div className="flex-1 relative">
+        <Scene robots={robots} objects={objects} />
+
+        {/* Clean HUD Overlay */}
+        <div className="absolute top-4 left-4 space-y-2 pointer-events-none">
+          <div className="bg-white/90 backdrop-blur-sm border border-gray-200 rounded-lg px-4 py-2 shadow-sm">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-green-500 rounded-full" />
+              <span className="text-gray-700 text-sm font-medium">System Active</span>
+            </div>
+          </div>
+          <div className="bg-white/90 backdrop-blur-sm border border-gray-200 rounded-lg px-4 py-2 shadow-sm">
+            <div className="text-gray-600 text-xs">
+              <div>Robots: {robots.length}</div>
+              <div>Objects: {objects.filter(o => !o.isPicked).length}/{objects.length}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Top right branding */}
+        <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-lg px-4 py-2 pointer-events-none shadow-sm">
+          <div className="text-gray-700 text-xs text-right">
+            <div className="text-lg font-bold mb-1 text-gray-900">
+              ANDREA INDUSTRIES
+            </div>
+            <div className="text-gray-500">Humanoid Control v2.0</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="w-[28rem] border-l border-gray-200 shadow-lg bg-white relative">
         <ChatPanel onCommand={handleCommand} logs={logs} />
       </div>
     </div>

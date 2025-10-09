@@ -1,14 +1,20 @@
 export interface ArmJointAngles {
-  shoulder: { pitch: number };
+  shoulder: { pitch: number; roll?: number }; // roll = arm away from body (abduction)
   elbow: { flex: number };
 }
 
 export interface LegJointAngles {
-  hip: { pitch: number };
+  hip: { pitch: number; roll?: number }; // roll = leg away from body (abduction)
   knee: { flex: number };
 }
 
+export interface TorsoAngles {
+  pitch: number; // Forward/backward lean
+  roll: number;  // Left/right tilt
+}
+
 export interface FullPose {
+  torso?: TorsoAngles; // Optional for backward compatibility
   leftArm: ArmJointAngles;
   rightArm: ArmJointAngles;
   leftLeg: LegJointAngles;
